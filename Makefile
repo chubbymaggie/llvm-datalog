@@ -1,52 +1,53 @@
 LEVEL := .
+CCLYZER_OPTS ?=
+PYTHON = python
+PIP    = pip
+CCLYZER = cclyzer
 
 all:
 
-module.logic      := logic
-module.facts      := fact-generator
-module.imports    := import-generator
-modules           := $(module.logic) $(module.facts) $(module.imports)
-targets.clean     := $(addsuffix .clean,$(modules))
-targets.install   := $(addsuffix .install,$(modules))
-targets.uninstall := $(addsuffix .uninstall,$(modules))
+module.logic   := logic
+module.facts   := fact-generator
+module.imports := import-generator
+module.jsonast := json-ast-exporter
+modules        := $(module.logic) $(module.facts) $(module.imports) $(module.jsonast)
+modules.clean  := $(addsuffix .clean,$(modules))
 
-include $(LEVEL)/common.mk
+include $(LEVEL)/src/common.mk
 
 
-#--------------------------
-#  Accumulating Rules
-#--------------------------
+# Paths to modules
+
+$(addsuffix _PATH, $(module.logic))   := src/logic
+$(addsuffix _PATH, $(module.facts))   := tools/fact-generator
+$(addsuffix _PATH, $(module.imports)) := tools/import-generator
+$(addsuffix _PATH, $(module.jsonast)) := tools/json-ast-exporter
+
+
+# Accumulating Rules
 
 $(modules):
-	$(MAKE) --directory=$@
+	$(MAKE) --directory=$($@_PATH)
 
-$(targets.clean): %.clean:
-	$(MAKE) --directory=$* clean
+$(modules.clean): %.clean:
+	$(MAKE) --directory=$($*_PATH) clean
 
-$(targets.install): %.install:
-	$(MAKE) --directory=$* install
+export PATH := $(abspath $(OUTDIR)/import-generator):$(PATH)
+schema-import: $(module.logic) $(module.imports)
+	$(MAKE) --directory=$($<_PATH) import.src
 
-$(targets.uninstall): %.uninstall:
-	$(MAKE) --directory=$* uninstall
+# Phony targets
 
-
-#--------------------------
-#  Common Phony Targets
-#--------------------------
-
-.PHONY: all $(modules)
+.PHONY: all clean $(modules) $(modules.clean)
 all: $(modules)
 
-.PHONY: clean $(targets.clean)
-clean: $(targets.clean)
+clean: $(modules.clean)
 	$(RM) -r $(OUTDIR)/
 
-.PHONY: install $(targets.install)
-install: $(targets.install)
-
-.PHONY: uninstall $(targets.uninstall)
-uninstall: $(targets.uninstall)
-
+.PHONY: install
+install:
+	$(PIP) install -r requirements.txt
+	$(PYTHON) setup.py install
 
 
 #-----------------------------------------
@@ -60,108 +61,65 @@ uninstall: $(targets.uninstall)
 #-----------------------------------------
 
 
-# A list of our benchmarks
-benchmarks := $(dir $(wildcard tests/*/*.bc))
+# Overwrite build directory for tests
+OUTDIR = $(BUILDDIR)/tests
+
+# List of our coreutils benchmarks
+coreutils_dir    := tests/coreutils-8.24
+coreutils_outdir := $(OUTDIR)/coreutils-8.24
+coreutils_files  := $(wildcard $(coreutils_dir)/*.bc)
+coreutils_tests  := $(coreutils_files:$(coreutils_dir)/%.bc=%)
+
+$(coreutils_outdir): | $(OUTDIR)
+	$(MKDIR) $@
 
 # Load LogicBlox functions
-include $(LEVEL)/logic/blox.mk
-
-# Look for .template files in this directory
-vpath %.template $(INSTALL_BIN)/
-
-# Generate build directory for tests
-$(eval $(call create-destdir,tests,tests))
+ifneq "$(MAKECMDGOALS)" "install"
+  include $(LEVEL)/src/logic/blox.mk
+endif
 
 # Phony testing targets that apply to all benchmarks
-.PHONY: tests.setup tests.export tests.load tests.clean
-
-# Modify PATH so that it includes the fact-generator executable
-export PATH := $(INSTALL_BIN):$(PATH)
-
-
-#----------------------------
-# Prompt routines
-#----------------------------
-
-define prompt
-  @echo -n "BENCH [ $(strip $1) ]:   "
-endef
-
-define prompt-echo
-  @echo "BENCH [ $(strip $1) ]: $(strip $2)"
-endef
+.PHONY: tests.setup tests.run tests.clean
 
 
 #----------------------------
 # Benchmark Template
 #----------------------------
 
-define benchmark_template
+define coreutils_template
 
-$1.dir    := tests/$1
-$1.outdir := $(tests.outdir)/$1
-$1.csv    := $$($1.outdir)/facts
-$1.db     := $$($1.outdir)/db
-$1.lb     := test-$1.run.lb
+$1.file   := $(coreutils_dir)/$1.bc
+$1.outdir := $(coreutils_outdir)/$1
 
 
 # Create subdirectories
 
-$$($1.csv)   : | $$($1.outdir)
-$$($1.db)    : | $$($1.outdir)
-$$($1.outdir): | $(tests.outdir)
+$$($1.outdir): | $(coreutils_outdir)
 	$(MKDIR) $$@
 
 
-# Fact-generation step
+# Run target
 
-test-$1.export: tests.setup | $$($1.csv)
-	$(call prompt-echo, $1, "Cleaning up older facts ...")
-	$(call prompt, $1)
-	$(RM) -r $$($1.csv)
-	$(call prompt-echo, $1, "Exporting facts ...")
-	$(call prompt, $1)
-	$(factgen.exe) -i $$($1.dir)/ -o $$($1.csv)
-	$(call prompt-echo, $1, "Stored facts in $$($1.csv)/")
-
-
-# Database-generation step
-
-test-$1.load: $$($1.lb) test-$1.export
-	$(call prompt-echo, $1, "Importing to database ...")
-	$(QUIET) $(RM) $(data.link)
-	$(QUIET) ln -s $$(abspath $$($1.csv)) $(data.link)
-	$(call prompt, $1)
-	$(call deploy-datalog-project,$$<)
-
-
-# Create datalog script
-
-.INTERMEDIATE: $$($1.lb)
-$$($1.lb): $(template.lb)
-	$(call prompt-echo, $1, "Generating script ...")
-	$(call prompt, $1)
-	$(M4) --define=WORKSPACE=$$($1.db) --define=DIR=$$($1.outdir)/ $$< > $$@
+test-$1: tests.setup
+	@echo Analyzing $1 ...
+	$(CCLYZER) analyze -o $$($1.outdir) $(CCLYZER_OPTS) $$($1.file)
 
 
 # Cleaning target
 
 .PHONY: test-$1.clean
-test-$1.clean:
-	$(RM) -r $$($1.db)/
-	$(RM) -r $$($1.csv)/
+test-$1-clean:
 	$(RM) -r $$($1.outdir)/
 
 
 # Phony targets dependencies
 
-tests.setup  : $(targets.install)
-tests.export : test-$1.export
-tests.load   : test-$1.load
-tests.clean  : test-$1.clean
+tests.setup  : $(targets)
+tests.run    : test-$1
+tests.clean  : test-$1-clean
 
 endef
 
 
 # !! Generate rules per benchmark !!
-$(foreach benchmark,$(benchmarks),$(eval $(call benchmark_template,$(benchmark:tests/%/=%))))
+$(foreach benchmark,$(coreutils_tests),$(eval $(call coreutils_template,$(benchmark))))

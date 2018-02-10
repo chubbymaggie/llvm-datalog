@@ -1,0 +1,155 @@
+//-----------------------------------------------------------------------
+// [Memory Abstraction]
+//
+// We have three types of memory allocations that a variable can point
+// to:
+// (i)   stack allocations,
+// (ii)  heap allocations, and
+// (iii) global allocations.
+//
+// The LLVM bitcode intermediate representation transforms every named
+// variable of type `x` to a pointer to `x`, and adds an `alloca`
+// instruction at the beginning of the function to allocate space for
+// it, in the stack.
+//
+// Thus, every address-of expression of the source code now
+// corresponds to an LLVM bitcode variable.
+//
+// For instance, the statements:
+//
+//     int x, *p;
+//     ...
+//     p = &x;
+//
+// will be transformed to:
+//
+//     i32 *x, **p;
+//     x = alloca i32
+//     p = alloca i32*
+//     ...
+//     store x, p
+//
+//
+// Since an arbitrary number of heap allocations may happen at
+// runtime, we must choose an appropriate abstraction. The most common
+// choice for Andersen type analyses is abstracting an allocation by
+// the instruction that allocates it. This is what we will follow here
+// too.
+//
+//-----------------------------------------------------------------------
+
+
+//-----------------------------------
+// Basic Allocation Type Hierarchy
+//-----------------------------------
+
+
+allocation(Alloc) -> .
+basic_allocation(Alloc) -> allocation(Alloc).
+stack_allocation(Alloc)  -> basic_allocation(Alloc).
+heap_allocation(Alloc)   -> basic_allocation(Alloc).
+global_allocation(Alloc) -> basic_allocation(Alloc).
+
+
+// Constructors
+
+stack_allocation:by_instruction[Insn] = StackAlloc ->
+   alloca_instruction(Insn), stack_allocation(StackAlloc).
+
+stack_allocation:by_parameter[Func, Index] = StackAlloc ->
+   function_decl(Func), int[64](Index), stack_allocation(StackAlloc).
+
+heap_allocation:by_instruction[Insn] = HeapAlloc ->
+   instruction(Insn), heap_allocation(HeapAlloc).
+
+global_allocation:by_variable[Var] = GlobalAlloc ->
+   global_variable(Var), global_allocation(GlobalAlloc).
+
+global_allocation:by_function[Func] = GlobalAlloc ->
+   function_decl(Func), global_allocation(GlobalAlloc).
+
+
+//---------------------------------------------------------------------------
+// [Pointer-compatible allocations]
+//
+// Allocations that may be used as pointers (e.g., can be dereferenced
+// to get another memory location).
+//---------------------------------------------------------------------------
+
+ptr_compatible_allocation(Alloc) -> allocation(Alloc).
+lang:isEntity[`ptr_compatible_allocation] = false.
+
+
+// We consider all stack and heap allocations as pointer-compatible
+
+ptr_compatible_allocation(Alloc) <-
+   stack_allocation(Alloc)
+ ; heap_allocation(Alloc).
+
+
+// Global constants cannot point-to anything, since storing to them
+// would change their contents
+
+ptr_compatible_allocation(Alloc) <-
+   global_allocation:by_variable[GVar] = Alloc,
+   !global_variable:constant(GVar).
+
+
+//-------------------------------------
+// Additional pseudo-allocation types
+//-------------------------------------
+
+non_allocation(Alloc) -> allocation(Alloc).
+
+// This nullary predicate represents any unknown memory location.
+
+unknown_location[] = Unknown ->
+   non_allocation(Unknown).
+
+// This nullary predicate represents `null`.
+
+null_location[] = Null ->
+   non_allocation(Null).
+
+
+//--------------------------------
+// Allocation properties
+//--------------------------------
+
+// Human readable representation for allocations
+
+allocation:to_string[Alloc] = Str ->
+   allocation(Alloc), string(Str).
+
+// Allocation type
+
+allocation:type[Alloc] = Type ->
+   allocation(Alloc), type(Type).
+
+// Allocation size in bytes
+
+allocation:size[Alloc] = Size ->
+   allocation(Alloc), int[64](Size).
+
+// Allocation of more than one elements
+
+array_allocation(Alloc) -> allocation(Alloc).
+lang:isEntity[`array_allocation] = false.
+
+// Allocation position on source code (requires debug info)
+allocation:pos(Alloc, Line, Column) ->
+   allocation(Alloc), int[64](Line), int[64](Column).
+
+//--------------------------------
+// Constructor declarations
+//--------------------------------
+
+lang:physical:storageModel[`allocation] = "ScalableSparse".
+lang:physical:capacity[`allocation] = 16777216. // 2 ^ 24
+lang:constructor(`stack_allocation:by_instruction).
+lang:constructor(`stack_allocation:by_parameter).
+lang:constructor(`heap_allocation:by_instruction).
+lang:constructor(`global_allocation:by_variable).
+lang:constructor(`global_allocation:by_function).
+lang:constructor(`unknown_location).
+lang:constructor(`null_location).

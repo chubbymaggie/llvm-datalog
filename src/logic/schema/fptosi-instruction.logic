@@ -1,0 +1,61 @@
+// http://llvm.org/docs/LangRef.html#fptosi-to-instruction
+// keywords: conversion; unary; instruction
+
+fptosi_instruction(Insn) -> instruction(Insn).
+
+fptosi_instruction:from[Insn] = Value ->
+   fptosi_instruction(Insn), operand(Value).
+
+fptosi_instruction:to_type[Insn] = Type ->
+   fptosi_instruction(Insn), type(Type).
+
+fptosi_instruction:from_type[Insn] = Type <-
+   fptosi_instruction:from[Insn] = Value,
+   operand:type[Value] = Type.
+
+
+//-------------------------------------------------------------------
+// [Constraints]
+//
+// 1) The ‘fptosi‘ instruction takes:
+//      (i)  a value to cast, which must be a scalar or vector
+//           floating point value,
+//      (ii) and a type to cast it to, which must be an integer
+//           type.
+//
+// 2) If the value to be casted is a vector floating point type:
+//      (i)  the type must be a vector integer type,
+//      (ii) with the same number of elements.
+//-------------------------------------------------------------------
+
+schema:sanity()
+ , fptosi_instruction(Insn)
+ ->
+   fptosi_instruction:from[Insn] = _.
+
+schema:sanity()
+ , fptosi_instruction(Insn)
+ ->
+   fptosi_instruction:to_type[Insn] = _.
+
+schema:sanity()
+ , fptosi_instruction:to_type[Insn] = Type
+ ->
+   instruction:type[Insn] = Type.
+
+schema:sanity()
+ , fptosi_instruction:from_type[_] = Type
+ ->
+   fp_type(Type); vector_type:fp(Type).
+
+schema:sanity()
+ , fptosi_instruction:to_type[_] = Type
+ ->
+   integer_type(Type); vector_type:integer(Type).
+
+schema:sanity()
+ , fptosi_instruction(Insn)
+ , fptosi_instruction:from_type[Insn] = From
+ , fptosi_instruction:to_type[Insn] = To
+ ->
+   vector:compatible(From, To).

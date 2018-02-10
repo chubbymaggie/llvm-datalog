@@ -1,0 +1,105 @@
+// http://llvm.org/docs/LangRef.html#shufflevector-instruction
+// keywords: vector; instruction
+
+shufflevector_instruction(Insn) -> instruction(Insn).
+
+shufflevector_instruction:first_vector[Insn] = First ->
+   shufflevector_instruction(Insn), operand(First).
+
+shufflevector_instruction:second_vector[Insn] = Second ->
+   shufflevector_instruction(Insn), operand(Second).
+
+shufflevector_instruction:mask[Insn] = Mask ->
+   shufflevector_instruction(Insn), constant(Mask).
+
+// The type of the two input vectors.
+shufflevector_instruction:input_type[Insn] = Type <-
+   shufflevector_instruction:first_vector[Insn] = Vector,
+   operand:type[Vector] = Type.
+
+// The element type of the two input vectors
+shufflevector_instruction:element_type[Insn] = ElemType <-
+   shufflevector_instruction:input_type[Insn] = Type,
+   vector_type:component[Type] = ElemType.
+
+// The type of the shuffle mask.
+shufflevector_instruction:mask_type[Insn] = Type <-
+   shufflevector_instruction:mask[Insn] = Mask,
+   constant:type[Mask] = Type.
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// 1. The 'shufflevector' instruction takes three arguments:
+//  (i)  two vectors of the same type, and
+//  (ii) a shuffle mask argument.
+//
+// 2. The shuffle mask is required to be:
+//  (i) a constant vector
+//  (ii) with i32-integer component type.
+//
+// 3. The result is a vector
+//  (i)  whose length is the same as the shuffle mask and
+//  (ii) whose element type is the same as the element type of the first
+//       two operands.
+//------------------------------------------------------------------------------
+
+
+// 1a. Required arguments
+
+schema:sanity()
+ , shufflevector_instruction(Insn)
+ ->
+   shufflevector_instruction:first_vector[Insn]  = _.
+
+schema:sanity()
+ , shufflevector_instruction(Insn)
+ ->
+   shufflevector_instruction:second_vector[Insn] = _.
+
+schema:sanity()
+ , shufflevector_instruction(Insn)
+ ->
+   shufflevector_instruction:mask[Insn] = _.
+
+
+// 1b. Constraints on the two input vectors
+
+schema:sanity()
+ , shufflevector_instruction:input_type[Insn] = InputType
+ , shufflevector_instruction:first_vector[Insn] = FirstVector
+ , shufflevector_instruction:second_vector[Insn] = SecondVector
+ , operand:type[FirstVector] = FirstType
+ , operand:type[SecondVector] = SecondType
+ ->
+   FirstType  = InputType,
+   SecondType = InputType.
+
+schema:sanity()
+ , shufflevector_instruction:input_type[_] = Input
+ ->
+   vector_type(Input).
+
+
+// 2. Constraints on the suffle mask
+
+schema:sanity()
+ , shufflevector_instruction:mask_type[_] = Mask
+ ->
+   vector_type:i32(Mask).
+
+
+// 3. Constraints on the result
+
+schema:sanity()
+ , instruction:type[Insn] = OutputType
+ , shufflevector_instruction:mask_type[Insn] = Mask
+ ->
+   vector:compatible(OutputType, Mask).          // constraint 3.i
+
+schema:sanity()
+ , shufflevector_instruction:element_type[Insn] = ElemType
+ , instruction:type[Insn] = OutputType
+ ->
+   vector_type:component[OutputType] = ElemType. // constaint 3.ii

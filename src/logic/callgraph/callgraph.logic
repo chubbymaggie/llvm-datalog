@@ -1,0 +1,42 @@
+//--------------------------------------------------------------------
+// [Basic predicate declarations]
+//--------------------------------------------------------------------
+
+// Call-graph edge from instruction to callee function
+
+callgraph:edge(Callee, CallerInsn) ->
+   instruction(CallerInsn), function_decl(Callee).
+
+// Call-graph edge from caller function to callee function
+
+callgraph:fn_edge(Callee, Caller) ->
+   function(Caller), function_decl(Callee).
+
+// This auxiliary predicate is derived directly from the instruction
+// edges
+
+callgraph:fn_edge(Callee, Caller) <-
+   callgraph:edge(Callee, CallerInsn),
+   instruction:function[CallerInsn] = Caller.
+
+//-------------------------------
+// [Reachability Constraints]
+//-------------------------------
+
+callgraph:fn_edge(Callee, Caller) ->
+   reachable_function(Callee),
+   reachable_function(Caller).
+
+
+//--------------------------------------------------------------------
+// Simple call-graph construction
+//--------------------------------------------------------------------
+
+// If a call instruction is reachable, then the callee function is
+// also reachable. This accounts for the static part of the
+// call-graph.
+
+callgraph:edge(Callee, CallerInsn), reachable_function(Callee)
+ <-
+   reachable_instruction(CallerInsn),
+   call_instruction:function[CallerInsn] = Callee.

@@ -1,0 +1,161 @@
+//----------------------------------------------------------------------
+// Some of the following do not have any use right now, since we
+// always end up with a single bitcode file and don't care about
+// multiple compilation units, etc.
+//
+// We assume the following, due to our whole-program analysis scheme:
+//
+//   1. For any referenced function, there will exist at least one
+//      function declaration (that may also be a definition).
+//
+//   2. If a function definition exists, then no declarations will be
+//      visible. This means that we do not have to deal with any
+//      indirections when creating the mapping from call instructions
+//      to functions being called. When a function definition exists,
+//      then the call instruction will be mapped to it. Otherwise, it
+//      will be mapped to a function declaration.
+//
+//   3. In principle, not all function declarations will map directly
+//      to a function definition. For instance, function calls that
+//      belong to dynamically linked libraries cannot be resolved.
+//      Thus, they will be mapped to function declarations instead.
+//
+//   4. There will exist at most one definition per function.
+//----------------------------------------------------------------------
+
+
+// Retrieve function names from constants
+
+constant_references_function[FC] = FuncDecl
+ <-
+  function_constant(FC),
+  function_constant:function_name[FC] = FuncName,
+  function:by_name[FuncName] = FuncDecl.
+
+// Retrieve variable names from constants
+
+constant_references_variable[GC] = GVar
+ <-
+  global_variable_constant(GC),
+  global_variable_constant:name[GC] = Name,
+  global_variable:by_name[Name] = GVar.
+
+// A constant may be enclosed by a bitcast constant
+// expression
+
+constant_references_function[Outer] = FuncDecl
+ <-
+   bitcast_constant_expression:from[Outer] = Inner,
+   constant_references_function[Inner] = FuncDecl.
+
+constant_references_variable[Outer] = GVar
+ <-
+   bitcast_constant_expression:from[Outer] = Inner,
+   constant_references_variable[Inner] = GVar.
+
+//-------------------------------------------------------------
+// [Aliases]
+//
+// An alias may also be used as a function operand.
+//-------------------------------------------------------------
+
+// `Constant` is possibly an aliasee of `Alias` (via `Aliasee`)
+_aliased_constants_plus_collisions(Alias, Aliasee, Constant)
+ <-
+   alias:aliasee[Alias] = Aliasee,
+   constant:hash[Aliasee] = HashCode,
+   constant:by_hash(HashCode, Constant).
+
+// `Constant` is an aliasee of `Alias`
+_aliasee(Constant, Alias)
+ <-
+   _aliased_constants_plus_collisions(Alias, Aliasee, Constant),
+   constant:value[Constant] = Value,
+   constant:value[Aliasee] = Value.
+
+// `Constant` is actually an alias (via `Alias`)
+_alias(Constant, Alias) <-
+   constant:value[Constant] = AliasName,
+   alias:by_name[AliasName] = Alias.
+
+// `OtherConstant` is an alias of `Constant`
+aliased_constants(OtherConstant, Constant) <-
+   _alias(OtherConstant, Alias),
+   _aliasee(Constant, Alias).
+
+constant_references_function[OtherConstant] = FuncDecl
+ <-
+   aliased_constants(OtherConstant, Constant),
+   constant_references_function[Constant] = FuncDecl.
+
+constant_references_variable[OtherConstant] = GVar
+ <-
+   aliased_constants(OtherConstant, Constant),
+   constant_references_variable[Constant] = GVar.
+
+
+// Mapping from call instructions to function declarations
+
+_instr_calls_func[Insn] = FuncDecl <-
+   direct_call_instruction(Insn),
+   call_instruction:__function[Insn] = Op,
+   operand:as_constant[Op] = C,
+   constant_references_function[C] = FuncDecl.
+
+_instr_calls_func[Insn] = FuncDecl <-
+   direct_invoke_instruction(Insn),
+   invoke_instruction:__function[Insn] = Op,
+   operand:as_constant[Op] = C,
+   constant_references_function[C] = FuncDecl.
+
+
+// Is this always true for our tests?
+direct_call_instruction(Insn)
+ ->
+   call_instruction:function[Insn] = _.
+
+direct_invoke_instruction(Insn)
+ ->
+   invoke_instruction:function[Insn] = _.
+
+
+//----------------------------------------------------------------------
+// This is for future use (if we ever introduce multiple compilation
+// units as input).
+//
+// * Each function declaration should be mapped to exactly one
+//   function definition.
+//
+// * Each function declaration, which also happens to be a definition,
+//   maps to itself.
+//----------------------------------------------------------------------
+
+function:definition[Decl] = Def ->
+   function_decl(Decl), function(Def).
+
+function:definition[Func] = Func <-
+   function(Func).
+
+
+// Map call instructions to functions. If definition is obtainable,
+// map to it; else map to declaration
+
+call_instruction:function[Insn] = Func <-
+   call_instruction(Insn),
+   _instr_calls_func[Insn] = FuncDecl,
+   function:definition[FuncDecl] = Func.
+
+call_instruction:function[Insn] = FuncDecl <-
+   call_instruction(Insn),
+   _instr_calls_func[Insn] = FuncDecl,
+   !function:definition[FuncDecl] = _.
+
+invoke_instruction:function[Insn] = Func <-
+   invoke_instruction(Insn),
+   _instr_calls_func[Insn] = FuncDecl,
+   function:definition[FuncDecl] = Func.
+
+invoke_instruction:function[Insn] = FuncDecl <-
+   invoke_instruction(Insn),
+   _instr_calls_func[Insn] = FuncDecl,
+   !function:definition[FuncDecl] = _.

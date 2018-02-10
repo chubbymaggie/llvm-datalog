@@ -1,0 +1,139 @@
+//------------------------------------
+// Instruction (EDB) Entities
+//------------------------------------
+
+instruction(Insn), instruction:id(Insn:Ref) -> string(Ref).
+
+lang:physical:capacity[`instruction] = 8388608.
+lang:physical:storageModel[`instruction] = "ScalableSparse".
+
+// Terminator Instruction Subset
+terminator_instruction(Insn) -> instruction(Insn).
+
+// prevent import-generator from producing file predicates
+lang:derivationType[`terminator_instruction] = "DerivedAndStored".
+lang:isEntity[`terminator_instruction] = false.
+
+
+// Instruction Flags
+instruction:flag(Insn, Flag) -> instruction(Insn), flag(Flag).
+
+// Apart from the instructions with 'void' type,
+// every instruction assigns its result to a variable.
+instruction:to[Insn] = Var -> instruction(Insn), variable(Var).
+
+// Auxiliary predicate that stores the instruction's return type
+instruction:type[Insn] = Type <-
+   instruction:to[Insn] = Var,
+   variable:type[Var] = Type.
+
+// helpful in avoiding non-termination warnings
+instruction:next_index[Insn, Index] = Next ->
+   instruction(Insn), int[64](Index), int[64](Next).
+
+// prevent import-generator from producing file predicates
+lang:derivationType[`instruction:next_index] = "DerivedAndStored".
+
+// Position of instruction on source code (if debug info is available)
+instruction:pos(Insn, Line, Column) ->
+   instruction(Insn), int[64](Line), int[64](Column).
+
+
+//------------------------------------
+// Sequence of instructions
+//------------------------------------
+
+// The next instruction in the source file.
+instruction:next[Insn] = Next ->
+   instruction(Insn), instruction(Next).
+
+instruction:prev[Insn] = Prev <-
+   instruction:next[Prev] = Insn.
+
+// The function that contains the instruction
+instruction:function[Insn] = Func ->
+   instruction(Insn), function(Func).
+
+function_contains(Insn, Func) <-
+   instruction:function[Insn] = Func.
+
+// The instruction's basic block
+instruction:basicblock[Insn] = BB ->
+   instruction(Insn), basicblock(BB).
+
+schema:sanity()
+ , instruction(Insn)
+ ->
+   instruction:function[Insn] = _.
+
+schema:sanity()
+ , instruction(Insn)
+ ->
+   instruction:basicblock[Insn] = _.
+
+
+//------------------------------------
+// Basic Blocks (IDB) Entities
+//------------------------------------
+
+basicblock(BB) -> .
+
+lang:physical:capacity[`basicblock] = 8388608.
+
+basicblock:by_label[Label] = BB ->
+   variable(Label), basicblock(BB).
+
+basicblock(BB), basicblock:by_label[Label] = BB <-
+   variable:label(Label).
+
+lang:physical:storageModel[`basicblock] = "ScalableSparse".
+lang:constructor(`basicblock:by_label).
+
+
+basicblock:first[BB2] = First <-
+   instruction:next[Last] = First,
+   instruction:basicblock[Last] = BB1,
+   instruction:basicblock[First] = BB2,
+   BB1 != BB2.
+
+basicblock:first[BB] = First <-
+   !instruction:prev[First] = _,
+   instruction:basicblock[First] = BB.
+
+
+basicblock:last[BB1] = Last <-
+   instruction:next[Last] = First,
+   instruction:basicblock[Last] = BB1,
+   instruction:basicblock[First] = BB2,
+   BB1 != BB2.
+
+basicblock:last[BB] = Last <-
+   !instruction:next[Last] = _,
+   instruction:basicblock[Last] = BB.
+
+
+basicblock:predecessors(BB, Pred) ->
+   basicblock(BB), basicblock(Pred).
+
+
+// see auxiliary logic
+
+lang:derivationType[`basicblock:predecessors] = "DerivedAndStored".
+lang:derivationType[`instruction:basicblock] = "DerivedAndStored".
+
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// Two consecutive instructions must either belong to the same basic
+// block, or the first of the two should be classified as a terminator
+// instruction.
+//------------------------------------------------------------------------------
+
+schema:sanity()
+ , instruction:next[Insn] = Next
+ , instruction:basicblock[Insn] = BB1
+ , instruction:basicblock[Next] = BB2
+ ->
+   BB1 = BB2 ; terminator_instruction(Insn).

@@ -1,0 +1,457 @@
+//------------------------------------------------------------------------------
+// Matching debug-info nodes and LLVM entities
+//------------------------------------------------------------------------------
+
+// Matching predicates
+
+di:match_variable(Var, DIVar) ->
+   variable(Var), di:variable(DIVar).
+
+di:match_global_variable[DIVar] = Var ->
+   global_variable(Var), di:variable(DIVar).
+
+di:match_type[DIType] = Type ->
+   type(Type), di:type_entry(DIType).
+
+type:di_entry[Type] = DIType ->
+   type(Type), di:type_entry(DIType).
+
+
+//------------------------------------------------------------------------------
+// Matching variables to debug-info nodes
+//------------------------------------------------------------------------------
+
+// Match global variables
+di:match_global_variable[DIVar] = Var <-
+   di:global_variable:resolved_name[DIVar] = Name,
+   global_variable:by_name[Name] = Var.
+
+
+// Match local variables
+di:match_variable(Var, DIVar) <-
+   di:local_variable_declaration(DIVar, Var).
+
+
+// Match function parameters
+di:match_variable(Param, DIParam) <-
+   di:local_variable:is_parameter(DIParam),
+   di:local_variable:arg_num[DIParam] = Index,
+   di:variable:scope[DIParam] = DIScope,
+   di:subprogram:function[DIScope] = Func,
+   function:param[Func, Index - 1] = Param.
+
+// TODO this could replace the current predicate import
+// variable:debug:source_name[Var] = Name <-
+//    di:match_variable(Var, DIVar),
+//    di:variable:name[DIVar] = Name.
+
+//------------------------------------------------------------------------------
+// Matching types to debug-info nodes
+//------------------------------------------------------------------------------
+
+// Match global variable types
+_di_possible_match_type(Type, DIType) <-
+   di:match_global_variable[DIVar] = Var,
+   di:variable:type[DIVar] = DIType,
+   global_variable:type[Var] = Type.
+
+// Match local variable types
+_di_possible_match_type(Type, DIType) <-
+   di:match_variable(Var, DIVar),
+   di:variable:type[DIVar] = DIType,
+   variable:type[Var] = Type.
+
+// Match after `unconsting`
+_di_possible_match_type(Type, DIType) <-
+   _di_possible_match_type(Type, DIConstType),
+   di:const_type_entry(DIConstType),
+   di:derived_type_base[DIConstType] = DIType.
+
+// Match component of pointer types
+_di_possible_match_type(CompType, DICompType) <-
+   _di_possible_match_type(PtrType, DIPtrType),
+   di:ptr_type_entry(DIPtrType),
+   di:derived_type_base[DIPtrType] = DICompType,
+   pointer_type:component[PtrType] = CompType.
+
+// Match component of reference types
+_di_possible_match_type(CompType, DICompType) <-
+   _di_possible_match_type(PtrType, DIRefType),
+   di:reference_type_entry(DIRefType),
+   di:derived_type_base[DIRefType] = DICompType,
+   pointer_type:component[PtrType] = CompType.
+
+// Match component of array types
+_di_possible_match_type(CompType, DICompType) <-
+   _di_possible_match_type(ArrayType, DIArrayType),
+   di:array_type_entry(DIArrayType),
+   di:array_type_base[DIArrayType] = DICompType,
+   array_type:component[ArrayType] = CompType.
+
+// Match typedef'd types
+_di_possible_match_type(Type, DITypedefdType) <-
+   _di_possible_match_type(Type, DIType),
+   typedefd_type[DIType, _] = DITypedefdType.
+
+_di_possible_match_type(Type, DIType) <-
+   _di_possible_match_type(Type, DITypedefdType),
+   typedefd_type[DIType, _] = DITypedefdType.
+
+
+//------------------------------------------------------------------------------
+// [DEBUG-INFO] Type Identification
+//
+// Find the LLVM type counterparts of debug info type nodes, and vice
+// versa.
+//------------------------------------------------------------------------------
+
+
+// Filter 1: Match types by name
+//
+// Take scopes into account but disregard template arguments, and
+// numeric or '.base' suffixes
+
+_aggregate_type_by_stripped_name(StrippedName, Type) <-
+   aggregate_type(Type), !array_type(Type),
+   type:id(Type:TypeID),
+   string:split[TypeID, ".", 1] = StrippedName.
+
+_di_match_types_by_name(DIType, Type) <-
+   di:composite_type_entry(DIType), !di_template_type(DIType),
+   di:type_entry:to_string[DIType] = ScopedName,
+   _aggregate_type_by_stripped_name(ScopedName, Type).
+
+_di_match_types_by_name(DIType, Type) <-
+   di:composite_type_entry(DIType),
+   di_template_type:stripped_name[DIType] = StrippedName,
+   _aggregate_type_by_stripped_name(StrippedName, Type).
+
+_di_match_types_by_name_inv__(Type, DIType) <-
+   _di_match_types_by_name(DIType, Type).
+
+// No resolution yet
+_multiple_types_by_name(DIType) <-
+   _di_match_types_by_name_inv__(Type1, DIType),
+   _di_match_types_by_name_inv__(Type2, DIType),
+   Type1 != Type2.
+
+_multiple_di_types_by_name(Type) <-
+   _di_match_types_by_name(DIType1, Type),
+   _di_match_types_by_name(DIType2, Type),
+   DIType1 != DIType2.
+
+// Resolved by this filter
+type:di_entry[Type] = DIType <-
+   _di_match_types_by_name(DIType, Type),
+   !_multiple_di_types_by_name(Type).
+
+di:match_type[DIType] = Type <-
+   _di_match_types_by_name_inv__(Type, DIType),
+   !_multiple_types_by_name(DIType).
+
+
+// Filter 2: Match types by size also.
+//
+// Only apply to tuples with matching names. Try both padded and
+// unpadded size.
+
+_di_match_types_by_name_and_size(DIType, Type) <-
+   di:type_entry:bit_size[DIType] = BitSize,
+   type:size[Type] = ByteSize,
+   type:unpadded_size[Type] = UnpaddedByteSize,
+   ( BitSize = 8 * ByteSize
+   ; BitSize = 8 * UnpaddedByteSize
+   ; !di_template_type(DIType)),
+   _di_match_types_by_name(DIType, Type).
+
+_di_match_types_by_name_and_size_inv__(Type, DIType) <-
+   _di_match_types_by_name_and_size(DIType, Type).
+
+// No resolution yet
+_multiple_types_by_name_and_size(DIType) <-
+   _di_match_types_by_name_and_size_inv__(Type1, DIType),
+   _di_match_types_by_name_and_size_inv__(Type2, DIType),
+   Type1 != Type2.
+
+_multiple_di_types_by_name_and_size(Type) <-
+   _di_match_types_by_name_and_size(DIType1, Type),
+   _di_match_types_by_name_and_size(DIType2, Type),
+   DIType1 != DIType2.
+
+// Resolved by this filter
+type:di_entry[Type] = DIType <-
+   _di_match_types_by_name_and_size(DIType, Type),
+   !_multiple_di_types_by_name_and_size(Type).
+
+di:match_type[DIType] = Type <-
+   _di_match_types_by_name_and_size_inv__(Type, DIType),
+   !_multiple_types_by_name_and_size(DIType).
+
+
+// Filter 3: Match types by layout.
+//
+// Prune types whose fields do not match their offsets.
+
+_di_field_at_offset(DIType, Offset) <-
+   di:type:field_offset[DIType, _] = Offset
+ ; di:type:inheritance_offset[DIType, _] = Offset.
+
+_padding_type(Type) <-
+   array_type:i8(Type) ; int8_type[] = Type.
+
+_layout_conflict(DIType, Type) <-
+   _di_match_types_by_name_and_size(DIType, Type),
+   struct_type:field_bit_offset[Type, Index] = Offset,
+   struct_type:field[Type, Index] = Field,
+   !_padding_type(Field),
+   !_di_field_at_offset(DIType, Offset).
+
+_layout_conflict(DIType, Type) <-
+   _di_match_types_by_name_and_size(DIType, Type),
+   di:type:field_offset[DIType, _] = Offset,
+   !struct_type:field_bit_offset[Type, _] = Offset.
+
+_layout_conflict(DIType, Type) <-
+   _di_match_types_by_name_and_size(DIType, Type),
+   di:type:inheritance_offset[DIType, _] = Offset,
+   !struct_type:field_bit_offset[Type, _] = Offset.
+
+_di_match_types_by_layout(DIType, Type) <-
+   _di_match_types_by_name_and_size(DIType, Type),
+   !_layout_conflict(DIType, Type).
+
+_di_match_types_by_layout_inv__(Type, DIType) <-
+   _di_match_types_by_layout(DIType, Type).
+
+// No resolution yet
+_multiple_types_by_layout(DIType) <-
+   _di_match_types_by_layout_inv__(Type1, DIType),
+   _di_match_types_by_layout_inv__(Type2, DIType),
+   Type1 != Type2.
+
+_multiple_di_types_by_layout(Type) <-
+   _di_match_types_by_layout(DIType1, Type),
+   _di_match_types_by_layout(DIType2, Type),
+   DIType1 != DIType2.
+
+// Resolved by this filter
+type:di_entry[Type] = DIType <-
+   _di_match_types_by_layout(DIType, Type),
+   !_multiple_di_types_by_layout(Type).
+
+di:match_type[DIType] = Type <-
+   _di_match_types_by_layout_inv__(Type, DIType),
+   !_multiple_types_by_layout(DIType).
+
+
+// Filter 4: Match types by layout and type association.
+//
+// This filter may be too strict and prune many true type
+// associations. However, we can still use it to infer new 1-to-1
+// associations, when all the previous filters have failed.
+
+_di_type_at_offset(DIType, Offset, DIFieldType) <-
+   di:type:field_offset[DIType, Index] = Offset,
+   di:type:field_type[DIType, Index] = DIFieldType.
+
+_di_type_at_offset(DIType, Offset, DIBaseType) <-
+   di:type:inheritance_offset[DIType, Index] = Offset,
+   di:type:inheritance_type[DIType, Index] = DIBaseType.
+
+_component_match(DIType, Type, Offset) <-
+   _di_match_types_by_layout(DIType, Type),
+   _di_type_at_offset(DIType, Offset, DIOffsetType),
+   struct_type:field_bit_offset[Type, Index] = Offset,
+   struct_type:field[Type, Index] = FieldType,
+   _di_possible_match_type(FieldType, DIOffsetType).
+
+_component_conflict(DIType, Type) <-
+   _di_match_types_by_layout(DIType, Type),
+   _di_type_at_offset(DIType, Offset, _),
+   struct_type:field_bit_offset[Type, _] = Offset,
+   !_component_match(DIType, Type, Offset).
+
+_di_match_types_by_usage(DIType, Type) <-
+   _di_match_types_by_layout(DIType, Type),
+   !_component_conflict(DIType, Type).
+
+_di_match_types_by_usage_inv__(Type, DIType) <-
+   _di_match_types_by_usage(DIType, Type).
+
+// No resolution yet
+_multiple_types_by_usage(DIType) <-
+   _di_match_types_by_usage_inv__(Type1, DIType),
+   _di_match_types_by_usage_inv__(Type2, DIType),
+   Type1 != Type2.
+
+_multiple_di_types_by_usage(Type) <-
+   _di_match_types_by_usage(DIType1, Type),
+   _di_match_types_by_usage(DIType2, Type),
+   DIType1 != DIType2.
+
+// Resolved by this filter
+type:di_entry[Type] = DIType <-
+   _di_match_types_by_usage(DIType, Type),
+   !_multiple_di_types_by_usage(Type).
+
+di:match_type[DIType] = Type <-
+   _di_match_types_by_usage_inv__(Type, DIType),
+   !_multiple_types_by_usage(DIType).
+
+
+//--------------------------------------------------------------------
+// Match Propagation
+//--------------------------------------------------------------------
+
+// Match array types
+di:match_type[DIArrayType] = ArrayType <-
+   di:array_type_entry(DIArrayType),
+   di:array_type_base[DIArrayType] = DICompType,
+   di:match_type[DICompType] = CompType,
+   array_type:component[ArrayType] = CompType,
+   array_type:size[ArrayType] = Size,
+   di:composite_type_entry:subrange[DIArrayType, 0] = DISubrange,
+   di:subrange:count[DISubrange] = Size.
+
+// Match after `unconsting`
+di:match_type[DIConstType] = Type <-
+   di:const_type_entry(DIConstType),
+   di:derived_type_base[DIConstType] = DIType,
+   di:match_type[DIType] = Type.
+
+// Match pointer types
+di:match_type[DIPtrType] = PtrType <-
+   di:ptr_type_entry(DIPtrType),
+   di:derived_type_base[DIPtrType] = DICompType,
+   di:match_type[DICompType] = CompType,
+   pointer_type:component[PtrType] = CompType.
+
+// Match reference types
+di:match_type[DIRefType] = PtrType <-
+   di:reference_type_entry(DIRefType),
+   di:derived_type_base[DIRefType] = DICompType,
+   di:match_type[DICompType] = CompType,
+   pointer_type:component[PtrType] = CompType.
+
+// Match typedef'd types
+di:match_type[DITypeAlias] = Type <-
+   typedefd_type[DITypeAlias, _] = DIType,
+   di:match_type[DIType] = Type.
+
+
+//------------------------------------------------------------------------------
+// [Compute field names and inheritance, by offset]
+//
+// Note that a union type may have two different field names at the
+// same offset. Hence, the debuginfo FIELD-NAME-AT-OFFSET relation
+// cannot be declared functional.
+//
+// Also, a struct/class type may inherit multiple types at offset 0,
+// if all but one of them are of zero size. Hence, neither the
+// debuginfo INHERITS-AT-OFFSET relation can be declared functional.
+//------------------------------------------------------------------------------
+
+// Bypass typedefs
+
+_true_type[DIType] = DITrueType <-
+   typedefd_type[DIType, _] = DITrueType,
+   !typedefd_type[DITrueType, _] = _.
+
+_true_type[DIType] = DITrueType <-
+   typedefd_type[DIType, _] = DIAnotherType,
+   _true_type[DIAnotherType] = DITrueType.
+
+_true_type_or_self[DIType] = DITrueType <-
+   _true_type[DIType] = DITrueType.
+
+_true_type_or_self[DIType] = DIType <-
+   di:composite_type_entry(DIType),
+   !typedefd_type[DIType, _] = _.
+
+// Field Names
+
+_di_field_name_at_offset(DIType, Offset, FieldName, DIFieldType) <-
+   di:type:field_name[DIType, Index] = FieldName,
+   di:type:field_offset[DIType, Index] = Offset,
+   di:type:field_type[DIType, Index] = DIFieldType,
+   !di:type:static_field[DIType, Index] = _.
+
+_type_field_conflict(Type, Offset) <-
+   _di_match_types_by_layout(DIType1, Type),
+   _di_match_types_by_layout(DIType2, Type),
+   _di_field_name_at_offset(DIType1, Offset, FieldName1, _),
+   _di_field_name_at_offset(DIType2, Offset, FieldName2, _),
+   FieldName1 != FieldName2.
+
+struct_type:field_name_at_offset[Type, Offset] = FieldName <-
+   struct_type:field_bit_offset[Type, _] = Offset,
+   _di_match_types_by_layout(DIType, Type),
+   _di_field_name_at_offset(DIType, Offset, FieldName, _),
+   struct_type(Type), !_type_field_conflict(Type, Offset).
+
+
+// Inheritance
+
+_di_inherits_at_offset(DIType, Offset, DIBaseType) <-
+   di:type:inheritance_type[DIType, Index] = DIBaseType,
+   di:type:inheritance_offset[DIType, Index] = Offset.
+
+struct_type:inherits_at_offset[Type, Offset] = BaseTypeName <-
+   struct_type:field_bit_offset[Type, Index] = Offset,
+   struct_type:field[Type, Index] = FieldType,
+   struct_type(FieldType),
+   _di_match_types_by_layout(DIType, Type),
+   _di_match_types_by_layout(DIBaseType, FieldType),
+   _di_inherits_at_offset(DIType, Offset, DIBaseType),
+   !di_template_type(DIBaseType),
+   di:type_entry:to_string[DIBaseType] = BaseTypeName.
+
+struct_type:inherits_at_offset[Type, Offset] = StrippedBaseTypeName <-
+   struct_type:field_bit_offset[Type, Index] = Offset,
+   struct_type:field[Type, Index] = FieldType,
+   struct_type(FieldType),
+   _di_match_types_by_layout(DIType, Type),
+   _di_match_types_by_layout(DIBaseType, FieldType),
+   _di_inherits_at_offset(DIType, Offset, DIBaseType),
+   di_template_type:stripped_name[DIBaseType] = StrippedBaseTypeName.
+
+
+//------------------------------------------------------------------------------
+// Class Type - Name Parsing
+//------------------------------------------------------------------------------
+
+class_type(Type) -> struct_type(Type).
+
+class_type(ClassType) <-
+   struct_type(ClassType),
+   _di_match_types_by_name(DIType, ClassType),
+   di:class_type_entry(DIType).
+
+class_type:name[ClassType] = ClassName <-
+   struct_type(ClassType),
+   type:di_entry[ClassType] = DIType,
+   di:composite_type_entry(DIType),
+   di:type_entry:to_string[DIType] = ClassName.
+
+class_type:name[ClassType] = ScopedName <-
+   struct_type(ClassType),
+   !type:di_entry[ClassType] = _,
+   _di_match_types_by_name(DIType, ClassType),
+   di:composite_type_entry(DIType), !di_template_type(DIType),
+   di:type_entry:to_string[DIType] = ScopedName.
+
+class_type:stripped_name[ClassType] = ClassName <-
+   struct_type(ClassType),
+   _di_match_types_by_name(DIType, ClassType),
+   di:composite_type_entry(DIType),
+   di_template_type:stripped_name[DIType] = ClassName.
+
+class_type:stripped_name[ClassType] = ClassName <-
+   struct_type(ClassType),
+   _di_match_types_by_name(DIType, ClassType),
+   di:composite_type_entry(DIType), !di_template_type(DIType),
+   di:type_entry:to_string[DIType] = ClassName.
+
+template_type_name(Name) <-
+   di_template_type(DIType),
+   di:type_entry:to_string[DIType] = Name.

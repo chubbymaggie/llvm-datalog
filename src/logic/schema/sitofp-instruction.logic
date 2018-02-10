@@ -1,0 +1,59 @@
+// http://llvm.org/docs/LangRef.html#sitofp-to-instruction
+// keywords: conversion; unary; instruction
+
+sitofp_instruction(Insn) -> instruction(Insn).
+
+sitofp_instruction:from[Insn] = Value ->
+   sitofp_instruction(Insn), operand(Value).
+
+sitofp_instruction:to_type[Insn] = Type ->
+   sitofp_instruction(Insn), type(Type).
+
+sitofp_instruction:from_type[Insn] = Type <-
+   sitofp_instruction:from[Insn] = Value,
+   operand:type[Value] = Type.
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// The ‘sitofp‘ instruction takes:
+//  (i)  a value to cast, which must be a scalar or vector integer value,
+//  (ii) and a type to cast it to, which must be a floating point type.
+//
+// If the value to be casted is a vector integer type:
+//  (i)  the type must be a vector floating point type,
+//  (ii) with the same number of elements.
+//------------------------------------------------------------------------------
+
+schema:sanity()
+ , sitofp_instruction(Insn)
+ ->
+   sitofp_instruction:from[Insn] = _.
+
+schema:sanity()
+ , sitofp_instruction(Insn)
+ ->
+   sitofp_instruction:to_type[Insn] = _.
+
+schema:sanity()
+ , sitofp_instruction:to_type[Insn] = Type
+ ->
+   instruction:type[Insn] = Type.
+
+schema:sanity()
+ , sitofp_instruction:from_type[_] = Type
+ ->
+   integer_type(Type); vector_type:integer(Type).
+
+schema:sanity()
+ , sitofp_instruction:to_type[_] = Type
+ ->
+   fp_type(Type); vector_type:fp(Type).
+
+schema:sanity()
+ , sitofp_instruction(Insn)
+ , sitofp_instruction:from_type[Insn] = From
+ , sitofp_instruction:to_type[Insn] = To
+ ->
+   vector:compatible(From, To).

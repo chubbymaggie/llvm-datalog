@@ -1,0 +1,273 @@
+//--------------------------------------
+// Simple constant subtypes
+//--------------------------------------
+
+integer_constant(C) -> constant(C).
+fp_constant(C) -> constant(C).
+nullptr_constant(C) -> constant(C).
+
+lang:isEntity[`integer_constant] = true.
+lang:isEntity[`fp_constant] = true.
+lang:isEntity[`nullptr_constant] = true.
+
+//--------------------------------------
+// Constant that references function
+//--------------------------------------
+
+function_constant(C) -> constant(C).
+
+function_constant:function_name[C] = FName ->
+   function_constant(C), string(FName).
+
+
+schema:sanity()
+ , function_constant(C)
+ ->
+   function_constant:function_name[C] = _.
+
+//---------------------------------------------
+// Constant that references global variable
+//---------------------------------------------
+
+global_variable_constant(C) -> constant(C).
+
+global_variable_constant:name[C] = Name ->
+   global_variable_constant(C), string(Name).
+
+schema:sanity()
+ , global_variable_constant(C)
+ ->
+   global_variable_constant:name[C] = _.
+
+
+// Map back to global variable
+
+global_variable_constant:to_var[C] = GVar ->
+   global_variable_constant(C), global_variable(GVar).
+
+global_variable_constant:to_var[C] = GVar <-
+   global_variable_constant:name[C] = Name,
+   global_variable:by_name[Name] = GVar.
+
+schema:sanity()
+ , global_variable_constant(C)
+ ->
+   global_variable_constant:to_var[C] = _.
+
+
+schema:sanity()
+ , global_variable_constant:to_var[C] = GVar
+ , global_variable:type[GVar] = Type
+ , constant:type[C] = Ptr
+ ->
+   pointer_type:component[Ptr] = Type.
+
+
+//--------------------------------------
+// Array of constants
+//--------------------------------------
+
+constant_array(C) -> constant(C).
+
+constant_array:index[CA, Index] = C ->
+   constant_array(CA), int[64](Index), constant(C).
+
+constant_array:size[CA] = Size ->
+   constant_array(CA), int[64](Size).
+
+
+schema:sanity()
+ , constant_array(C)
+ ->
+   constant_array:size[C] = _.
+
+//--------------------------------------
+// Constant Struct
+//--------------------------------------
+
+constant_struct(C) -> constant(C).
+
+constant_struct:index[CS, Index] = C ->
+   constant_struct(CS), int[64](Index), constant(C).
+
+constant_struct:size[CS] = Size ->
+   constant_struct(CS), int[64](Size).
+
+
+schema:sanity()
+ , constant_struct(C)
+ ->
+   constant_struct:size[C] = _.
+
+//--------------------------------------
+// Constant Vector
+//--------------------------------------
+
+constant_vector(C) -> constant(C).
+
+constant_vector:index[CV, Index] = C ->
+   constant_vector(CV), int[64](Index), constant(C).
+
+constant_vector:size[CV] = Size ->
+   constant_vector(CV), int[64](Size).
+
+
+schema:sanity()
+ , constant_vector(C)
+ ->
+   constant_vector:size[C] = _.
+
+//--------------------------------------
+// [Constant Expressions Hierarchy]
+//--------------------------------------
+
+constant_expression(C) -> constant(C).
+lang:isEntity[`constant_expression] = true.
+
+
+//--------------------------------------
+// Bitcast Constant Expression
+//--------------------------------------
+
+bitcast_constant_expression(C) -> constant_expression(C).
+
+bitcast_constant_expression:from[CExpr] = Value ->
+   bitcast_constant_expression(CExpr), constant(Value).
+
+bitcast_constant_expression:to_type[CExpr] = Type ->
+   bitcast_constant_expression(CExpr), type(Type).
+
+bitcast_constant_expression:to_type[CExpr] = Type
+ <-
+   bitcast_constant_expression(CExpr),
+   constant:type[CExpr] = Type.
+
+
+schema:sanity()
+ , bitcast_constant_expression(CExpr)
+ ->
+   bitcast_constant_expression:from[CExpr] = _.
+
+schema:sanity()
+ , bitcast_constant_expression(CExpr)
+ ->
+   bitcast_constant_expression:to_type[CExpr] = _.
+
+
+//--------------------------------------
+// Inttoptr Constant Expression
+//--------------------------------------
+
+inttoptr_constant_expression(C) -> constant_expression(C).
+
+inttoptr_constant_expression:from[CExpr] = Value ->
+   inttoptr_constant_expression(CExpr), constant(Value).
+
+schema:sanity()
+ , inttoptr_constant_expression(CExpr)
+ ->
+   inttoptr_constant_expression:from[CExpr] = _.
+
+
+//--------------------------------------
+// Ptrtoint Constant Expression
+//--------------------------------------
+
+ptrtoint_constant_expression(C) -> constant_expression(C).
+
+ptrtoint_constant_expression:from[CExpr] = Value ->
+   ptrtoint_constant_expression(CExpr), constant(Value).
+
+schema:sanity()
+ , ptrtoint_constant_expression(CExpr)
+ ->
+   ptrtoint_constant_expression:from[CExpr] = _.
+
+
+//--------------------------------------------
+// Get Element Pointer  Constant Expression
+//--------------------------------------------
+
+getelementptr_constant_expression(C) -> constant(C).
+
+getelementptr_constant_expression:base[CExpr] = C ->
+   getelementptr_constant_expression(CExpr), constant(C).
+
+getelementptr_constant_expression:index[CExpr, Index] = C ->
+   getelementptr_constant_expression(CExpr), int[64](Index), constant(C).
+
+getelementptr_constant_expression:nindices[CExpr] = Size ->
+   getelementptr_constant_expression(CExpr), int[64](Size).
+
+
+schema:sanity()
+ , getelementptr_constant_expression(C)
+ ->
+   getelementptr_constant_expression:nindices[C] = _.
+
+schema:sanity()
+ , getelementptr_constant_expression(C)
+ ->
+   getelementptr_constant_expression:base[C] = _.
+
+
+// Auxiliary type predicates
+
+getelementptr_constant_expression:base_type[CExpr] = Type <-
+   getelementptr_constant_expression:base[CExpr] = Ptr,
+   constant:type[Ptr] = Type.
+
+getelementptr_constant_expression:index_type(CExpr, Type) <-
+   getelementptr_constant_expression:index[CExpr, _] = Idx,
+   constant:type[Idx] = Type.
+
+
+// Compute next index of each GEP constant expression
+
+constant_expression:next_index[CExpr, Index] = Index + 1 <-
+   getelementptr_constant_expression:index[CExpr, Index] = _.
+
+
+// Compute types of GEP constant expression up to some index
+
+getelementptr_constant_expression:interm_type[CExpr, 1] = Comp <-
+   getelementptr_constant_expression:base[CExpr] = Ptr,
+   constant:type[Ptr] = Type,
+   pointer_type:component[Type] = Comp.
+
+getelementptr_constant_expression:interm_type[CExpr, 1] = Comp <-
+   getelementptr_constant_expression:base[CExpr] = Vector,
+   constant:type[Vector] = Type,
+   vector_type:component[Type] = Interm,
+   pointer_type:component[Interm] = Comp.
+
+getelementptr_constant_expression:interm_type[CExpr, Next] = Comp <-
+   getelementptr_constant_expression:interm_type[CExpr, Index] = Type,
+   array_type:component[Type] = Comp,
+   constant_expression:next_index[CExpr, Index] = Next.
+
+getelementptr_constant_expression:interm_type[CExpr, Next] = Comp <-
+   getelementptr_constant_expression:interm_type[CExpr, Index] = Type,
+   vector_type:component[Type] = Comp,
+   constant_expression:next_index[CExpr, Index] = Next.
+
+getelementptr_constant_expression:interm_type[CExpr, Next] = Comp <-
+   getelementptr_constant_expression:interm_type[CExpr, Index] = Type,
+   getelementptr_constant_expression:index[CExpr, Index] = Idx,
+   constant:to_int[Idx] = Value,
+   int32_type[] = i32,
+   constant:type[Idx] = i32,
+   struct_type:field[Type, Value] = Comp,
+   constant_expression:next_index[CExpr, Index] = Next.
+
+getelementptr_constant_expression:value_type[CExpr] = Type <-
+   getelementptr_constant_expression:nindices[CExpr] = Total,
+   getelementptr_constant_expression:interm_type[CExpr, Total] = Type.
+
+
+// Additional constaints
+
+schema:sanity()
+ , getelementptr_constant_expression(CExpr)
+ ->
+   getelementptr_constant_expression:value_type[CExpr] = _.

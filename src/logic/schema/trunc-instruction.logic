@@ -1,0 +1,61 @@
+// http://llvm.org/docs/LangRef.html#trunc-to-instruction
+// keywords: conversion; unary; instruction
+
+trunc_instruction(Insn) -> instruction(Insn).
+
+trunc_instruction:from[Insn] = Value ->
+   trunc_instruction(Insn), operand(Value).
+
+trunc_instruction:to_type[Insn] = Type ->
+   trunc_instruction(Insn), type(Type).
+
+trunc_instruction:from_type[Insn] = Type <-
+   trunc_instruction:from[Insn] = Value,
+   operand:type[Value] = Type.
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// 1) The ‘trunc‘ instruction takes:
+//      (i)  a value to trunc,
+//      (ii) and a type to trunc it to.
+//
+// 2) Both source and destination types must be:
+//      (i)  integers or
+//      (ii) vectors of the same number of integers.
+//
+// 3) The source type must be larger than the destination type.
+//------------------------------------------------------------------------------
+
+schema:sanity()
+ , trunc_instruction(Insn)
+ ->
+   trunc_instruction:from[Insn] = _.
+
+schema:sanity()
+ , trunc_instruction(Insn)
+ ->
+   trunc_instruction:to_type[Insn] = _.
+
+schema:sanity()
+ , trunc_instruction:to_type[Insn] = Type
+ ->
+   instruction:type[Insn] = Type.
+
+schema:sanity()
+ , trunc_instruction:from_type[_] = Type
+ ->
+   integer_type(Type); vector_type:integer(Type).
+
+schema:sanity()
+ , trunc_instruction:to_type[_] = Type
+ ->
+   integer_type(Type); vector_type:integer(Type).
+
+schema:sanity()
+ , trunc_instruction(Insn)
+ , trunc_instruction:from_type[Insn] = From
+ , trunc_instruction:to_type[Insn] = To
+ ->
+   vector:compatible(From, To).

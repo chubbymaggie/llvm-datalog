@@ -1,0 +1,57 @@
+//------------------------------------------------------------------------------
+// [Marks all functions as reachable]
+//
+// This is useful if the artifact to be analyzed doesn't have any
+// known entry points (e.g., dynamic library). In such a case, it
+// makes sense to treat all functions defined therein as potential
+// entry points.
+//------------------------------------------------------------------------------
+
+user_options:entrypoints[] = Value -> string(Value).
+
+reachable_function(F) <-
+   user_options:entrypoints[] = "library", function(F).
+
+
+//------------------------------------------------------------------------------
+// [Handle Pointer Arithmetic]
+//
+// Handling pointer arithmetic in a sound way is quite expensive. It
+// may double the overall analysis time. Hence, it is optional and can
+// be turned on/off with the folowing configuration option.
+//------------------------------------------------------------------------------
+
+user_options:pointer_arithmetic[] = Value -> string(Value).
+
+user_options:pointer_arithmetic[] = Value
+ ->
+   Value = "on"
+ ; Value = "off".
+
+analyze_pointer_arithmetic() <-
+   user_options:pointer_arithmetic[] = "on".
+
+//------------------------------------------------------------------------------
+// [Handle optimized code]
+//
+// Similarly, handling optimized code requires a set of techniques
+// that may be completely redundant or even harmful for the precision
+// of the analysis, in the common case (non-optimized code). Hence, it
+// is optional and can be turned on/off with the folowing
+// configuration option.
+//
+// For instance, code optimizations may include inlined
+// constructors. In such a case, we cannot rely on the presence of a
+// call to a constructor after a heap allocation instruction, to be
+// able to identify the type of the allocation.
+//------------------------------------------------------------------------------
+
+user_options:optimized_code[] = Value -> string(Value).
+
+user_options:optimized_code[] = Value
+ ->
+   Value = "on"
+ ; Value = "off".
+
+inlined_constructors() <-
+   user_options:optimized_code[] = "on".

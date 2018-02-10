@@ -1,0 +1,97 @@
+//----------------------------------------------------------------------
+// [Auxiliary logic for Basic Blocks]
+//
+// The problem here is that basic-blocks are entites computed by *IDB*
+// logic.
+//
+// Thus, trying to import related predicates, namely: (i)
+//  basicblock:predecessors, and (ii) instruction:basicblock, via
+//  `import-generator' will fail.
+//
+// The reason is that no basic blocks can be constructed in the heads
+// of the auto-generated rules (with file predicates in their bodies).
+//
+// Additionally, if we were to skip the creation of new entities at
+// that point, no data would be imported at all, since basic-blocks
+// will be generated probably *after* the time we activate the file
+// predicate imports (for the aforementioned predicates), with the
+// current semantics.
+//
+// To solve this, we employ a level of indirection, introducing the
+// auxiliary *EDB* predicates (i) basicblock:pred_aux, and (ii)
+// instruction:bb_entry, respectively.
+//
+// Now we can use import-generator to import these predicates, in the
+// normal fashion, and supply the following rules to fill our initial
+// IDB predicates, based on them.
+//----------------------------------------------------------------------
+
+
+// Basic block predecessors
+
+basicblock:pred_aux(Label, Pred) ->
+   variable(Label), variable(Pred).
+
+basicblock:pred_aux(Label, Pred)
+ ->
+   variable:label(Label),
+   variable:label(Pred).
+
+basicblock:predecessors(BB1, BB2) <-
+   basicblock:pred_aux(Label, Pred),
+   basicblock:by_label[Label] = BB1,
+   basicblock:by_label[Pred] = BB2.
+
+
+// Basic blocks of instructions
+
+instruction:bb_entry[Insn] = Label ->
+   instruction(Insn), variable(Label).
+
+instruction:bb_entry[_] = Label
+ ->
+   variable:label(Label).
+
+instruction:basicblock[Insn] = BB <-
+   instruction:bb_entry[Insn] = Label,
+   basicblock:by_label[Label] = BB.
+
+
+
+
+//----------------------------------------------------------------------
+// [Auxiliary logic for Landing Pad Clauses]
+//
+// The issue here is that we have two subtypes of clause, a filter
+// clause and a catch clause, but a single constructor. We want to
+// decide which one to create depending on the file from which we
+// import.
+//
+// That is, we need as many files to import from, as the number of
+// *concrete* clause subtypes.
+//
+// Similarly, we introduce a level of indirection through EDB
+// predicates (i) catch_tmp, and (ii) filter_tmp, and use these to
+// auto-generate clause entities and link them with their landing pad
+// instructions.
+//----------------------------------------------------------------------
+
+
+landingpad_instruction:clause:catch_tmp[Insn, Index] = Constant ->
+   landingpad_instruction(Insn), int[64](Index), constant(Constant).
+
+landingpad_instruction:clause:filter_tmp[Insn, Index] = Constant ->
+   landingpad_instruction(Insn), int[64](Index), constant(Constant).
+
+
+catch_clause(Clause)
+ , clause:by_index[Insn, Index] = Clause
+ , catch_clause:arg[Clause] = Constant
+ , landingpad_instruction:clause[Insn, Index] = Clause <-
+   landingpad_instruction:clause:catch_tmp[Insn, Index] = Constant.
+
+filter_clause(Clause)
+ , clause:by_index[Insn, Index] = Clause
+ , filter_clause:arg[Clause] = Constant
+ , landingpad_instruction:clause[Insn, Index] = Clause <-
+   landingpad_instruction:clause:filter_tmp[Insn, Index] = Constant.

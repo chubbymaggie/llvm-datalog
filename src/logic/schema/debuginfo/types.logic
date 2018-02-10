@@ -1,0 +1,197 @@
+//-----------------------------------------------------------
+// Debug Info - Core Type Entry
+//-----------------------------------------------------------
+
+di:type_entry(Entry) -> di:entry(Entry).
+
+di:type_entry:name[Entry] = Name ->
+   di:type_entry(Entry), string(Name).
+
+di:type_entry:line[Entry] = Line ->
+   di:type_entry(Entry), uint[64](Line).
+
+di:type_entry:flag(Entry, Flag) ->
+   di:type_entry(Entry), string(Flag).
+
+_di:type_entry:by_flag(Flag, Entry) <-
+   di:type_entry:flag(Entry, Flag).
+
+// Scope of type
+di:type_entry:scope[Entry] = Scope ->
+   di:type_entry(Entry), di:scope(Scope).
+
+di:type_entry:raw_scope[Entry] = Scope ->
+   di:type_entry(Entry), string(Scope).
+
+// Size properties
+di:type_entry:bit_size[Entry] = Size ->
+   di:type_entry(Entry), uint[64](Size).
+
+di:type_entry:bit_align[Entry] = Align ->
+   di:type_entry(Entry), uint[64](Align).
+
+di:type_entry:bit_offset[Entry] = Offset ->
+   di:type_entry(Entry), uint[64](Offset).
+
+di:type_entry:is_forward_decl(Entry) <-
+   _di:type_entry:by_flag("DIFlagFwdDecl", Entry).
+
+di:type_entry:is_static_member(Entry) <-
+   _di:type_entry:by_flag("DIFlagStaticMember", Entry).
+
+// Constraints
+di:type_entry:name[_] = Name -> Name != "".
+
+//-----------------------------------------------------------
+// Debug Info - Basic Type Entry
+//-----------------------------------------------------------
+
+di:basic_type_entry(Entry) -> di:type_entry(Entry).
+
+
+//-----------------------------------------------------------
+// Debug Info - Composite Type Entry
+//-----------------------------------------------------------
+
+di:composite_type_entry(Entry) -> di:type_entry(Entry).
+
+di:composite_type_entry:file[Entry] = File ->
+   di:composite_type_entry(Entry), di:file(File).
+
+di:composite_type_entry:abi_id[Entry] = ID ->
+   di:composite_type_entry(Entry), string(ID).
+
+di:composite_type_entry:field[Entry, Index] = Field ->
+   di:composite_type_entry(Entry), uint[64](Index), di:type_entry(Field).
+
+schema:sanity()
+ , di:composite_type_entry:field[Entry, _] = _
+ ->
+   di:structure_type_entry(Entry)
+ ; di:class_type_entry(Entry)
+ ; di:union_type_entry(Entry).
+
+di:composite_type_entry:template_param[Entry, Index] = Param ->
+   di:composite_type_entry(Entry), uint[64](Index), di:template_param(Param).
+
+di:structure_type_entry(Entry) -> di:composite_type_entry(Entry).
+di:class_type_entry(Entry) -> di:composite_type_entry(Entry).
+di:array_type_entry(Entry) -> di:composite_type_entry(Entry).
+di:union_type_entry(Entry) -> di:composite_type_entry(Entry).
+di:enum_type_entry(Entry) -> di:composite_type_entry(Entry).
+
+// Array Composite Types
+di:composite_type_entry:subrange[Entry, Index] = Subrange ->
+   di:composite_type_entry(Entry), uint[64](Index), di:subrange(Subrange).
+
+schema:sanity()
+ , di:composite_type_entry:subrange[Entry, _] = _
+ ->
+   di:array_type_entry(Entry).
+
+// Enum Composite Types
+di:composite_type_entry:enumerator[Entry, Index] = Enumerator ->
+   di:composite_type_entry(Entry), uint[64](Index), di:enumerator(Enumerator).
+
+schema:sanity()
+ , di:composite_type_entry:enumerator[Entry, _] = _
+ ->
+   di:enum_type_entry(Entry).
+
+// Base type
+di:composite_type_entry:base_type[Entry] = Type ->
+   di:composite_type_entry(Entry), di:type_entry(Type).
+
+di:composite_type_entry:raw_base_type[Entry] = Type ->
+   di:composite_type_entry(Entry), string(Type).
+
+// Virtual Table
+di:composite_type_entry:vtable[Entry] = VT ->
+   di:composite_type_entry(Entry), di:type_entry(VT).
+
+di:composite_type_entry:raw_vtable[Entry] = VT ->
+   di:composite_type_entry(Entry), string(VT).
+
+
+//-----------------------------------------------------------
+// Debug Info - Derived Type Entry
+//-----------------------------------------------------------
+
+di:derived_type_entry(Entry) -> di:type_entry(Entry).
+
+di:derived_type_entry:file[Entry] = File ->
+   di:derived_type_entry(Entry), di:file(File).
+
+di:derived_type_entry:kind[Entry] = Kind ->
+   di:derived_type_entry(Entry), di:tag(Kind).
+
+_di:derived_type_entry:by_kind(Entry, Kind) <-
+   di:derived_type_entry:kind[Entry] = Kind.
+
+
+// Categorize derived type entries by kind
+
+di:member_type_entry(Entry) <-
+   di:tag:member[] = MemberTag,
+   _di:derived_type_entry:by_kind(Entry, MemberTag).
+
+di:ptr_type_entry(Entry) <-
+   di:tag:pointer_type[] = PtrTag,
+   _di:derived_type_entry:by_kind(Entry, PtrTag).
+
+di:const_type_entry(Entry) <-
+   di:tag:const_type[] = ConstTag,
+   _di:derived_type_entry:by_kind(Entry, ConstTag).
+
+di:typedef_type_entry(Entry) <-
+   di:tag:typedef[] = TypedefTag,
+   _di:derived_type_entry:by_kind(Entry, TypedefTag).
+
+di:restrict_type_entry(Entry) <-
+   di:tag:restrict_type[] = RestrictTag,
+   _di:derived_type_entry:by_kind(Entry, RestrictTag).
+
+di:volatile_type_entry(Entry) <-
+   di:tag:volatile_type[] = VolatileTag,
+   _di:derived_type_entry:by_kind(Entry, VolatileTag).
+
+di:reference_type_entry(Entry) <-
+   di:tag:reference_type[] = ReferenceTag,
+   _di:derived_type_entry:by_kind(Entry, ReferenceTag).
+
+di:friend_type_entry(Entry) <-
+   di:tag:friend[] = FriendTag,
+   _di:derived_type_entry:by_kind(Entry, FriendTag).
+
+di:inheritance_type_entry(Entry) <-
+   di:tag:inheritance[] = InheritanceTag,
+   _di:derived_type_entry:by_kind(Entry, InheritanceTag).
+
+di:rvalue_ref_type_entry(Entry) <-
+   di:tag:rvalue_ref_type[] = RValueRefTag,
+   _di:derived_type_entry:by_kind(Entry, RValueRefTag).
+
+di:ptr_to_member_type_entry(Entry) <-
+   di:tag:ptr_to_member_type[] = PtrToMemberTag,
+   _di:derived_type_entry:by_kind(Entry, PtrToMemberTag).
+
+// Base type
+di:derived_type_entry:base_type[Entry] = Type ->
+   di:derived_type_entry(Entry), di:type_entry(Type).
+
+di:derived_type_entry:raw_base_type[Entry] = Type ->
+   di:derived_type_entry(Entry), string(Type).
+
+
+//-----------------------------------------------------------
+// Debug Info - Subroutine Type Entry
+//-----------------------------------------------------------
+
+di:subroutine_type_entry(Entry) -> di:type_entry(Entry).
+
+// Array elements
+di:subroutine_type_entry:type_elem[Entry, Index] = Type ->
+   di:subroutine_type_entry(Entry), uint[64](Index), di:type_entry(Type).
+
+di:subroutine_type_entry:raw_type_elem[Entry, Index] = Type ->
+   di:subroutine_type_entry(Entry), uint[64](Index), string(Type).

@@ -1,0 +1,118 @@
+//---------------------------------------
+//  [Interprocedural Logic]
+//---------------------------------------
+
+// Flow of actual arguments regardless of instruction type
+function:actual_arg(Callee, Index, Argument) ->
+   function_decl(Callee), int[64](Index), operand(Argument).
+
+function:actual_arg(Callee, Index, Argument) <-
+   call_instruction:arg[CallInsn, Index] = Argument,
+   callgraph:edge(Callee, CallInsn).
+
+function:actual_arg(Callee, Index, Argument) <-
+   invoke_instruction:arg[InvokeInsn, Index] = Argument,
+   callgraph:edge(Callee, InvokeInsn).
+
+// Identify variable arguments for variadic functions
+function:va_actual_arg(Callee, Index, Argument) <-
+   function:actual_arg(Callee, Index, Argument),
+   function:type[Callee] = Type,
+   function_type:varargs(Type),
+   function_type:nparams[Type] = N,
+   Index >= N.
+
+// Forward reference
+memcpy:to_var(Insn, To, From) ->
+   instruction(Insn), variable(To), operand(From).
+
+// actual arg to formal parameter
+assign_instruction(Param, Argument) <-
+   function:actual_arg(Callee, Index, Argument),
+   function:param[Callee, Index] = Param,
+   // Attribute is not passed by value
+   !function:param_by_value(Callee, Index).
+
+// same with pass-by-value semantics: model it as a memcpy instruction
+memcpy:to_var(Insn, Param, Argument) <-
+   ( call_instruction:arg[Insn, Index] = Argument
+   ; invoke_instruction:arg[Insn, Index] = Argument ),
+   callgraph:edge(Callee, Insn),
+   function:param[Callee, Index] = Param,
+   // Attribute is passed by value
+   function:param_by_value(Callee, Index).
+
+// `return` instruction to `call` instruction target
+assign_instruction(ToVar, RetValue) <-
+   call_instruction(CallInsn),  // do not model `invoke` instructions yet
+   callgraph:edge(Callee, CallInsn),
+   function_returns_value(RetValue, Callee),
+   instruction:to[CallInsn] = ToVar.
+
+function_returns_value(RetValue, InFunction) <-
+   ret_instruction:value[RetInsn] = RetValue,
+   instruction:function[RetInsn] = InFunction.
+
+// `va_arg` instruction
+//
+// TODO: model target-specific value `va_list` and calls to related
+// LLVM intrinsic functions. Right now this may produce nothing
+
+assign_instruction(ToVar, Argument) <-
+   va_arg_instruction:type[VArgInsn] = ArgType,
+   instruction:to[VArgInsn] = ToVar,
+   instruction:function[VArgInsn] = Callee,
+   function:va_actual_arg(Callee, _, Argument),
+   operand:type[Argument] = ArgType.
+
+
+// Augment call-graph by adding edges for function pointers
+
+function:by_location[Alloc] = Callee <-
+   global_allocation:by_function[Callee] = Alloc.
+
+callgraph:edge(Callee, CallerInsn), reachable_function(Callee)
+ <-
+   reachable_instruction(CallerInsn),
+   indirect_call_instruction(CallerInsn),
+   call_instruction:__function[CallerInsn] = Op,
+   operand_points_to(Alloc, Op),
+   function:by_location[Alloc] = Callee,
+   function:type[Callee] = ActualType,
+   operand:type[Op] = OpType,
+   pointer_type:component[OpType] = DeclaredType,
+   type_compatible(ActualType, DeclaredType).
+
+// Augment call-graph by adding edges for `invoke` instructions
+
+callgraph:edge(Callee, CallerInsn), reachable_function(Callee)
+ <-
+   reachable_instruction(CallerInsn),
+   invoke_instruction(CallerInsn),
+   invoke_instruction:__function[CallerInsn] = Op,
+   operand_points_to(Alloc, Op),
+   function:by_location[Alloc] = Callee,
+   function:type[Callee] = ActualType,
+   operand:type[Op] = OpType,
+   pointer_type:component[OpType] = DeclaredType,
+   type_compatible(ActualType, DeclaredType).
+
+
+// The following rule augments the logic about identifying functions
+// registered to run at program exit, so that it also works with
+// function pointers.
+
+callgraph:inv_edge(Insn, Func) <-
+   callgraph:edge(Func, Insn).
+
+registers_atexit(Operand) <-
+   function:by_name["@atexit"] = AtExit,
+   callgraph:edge(AtExit, Insn),
+   callgraph:inv_edge(Insn, AtExit), // redundant OPT clause
+   ( call_instruction:arg[Insn, 0] = Operand
+   ; invoke_instruction:arg[Insn, 0] = Operand).
+
+reachable_function(Callback) <-
+   registers_atexit(Operand),
+   operand_points_to(Alloc, Operand),
+   function:by_location[Alloc] = Callback.

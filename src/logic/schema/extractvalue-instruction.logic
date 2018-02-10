@@ -1,0 +1,88 @@
+// http://llvm.org/docs/LangRef.html#extractvalue-instruction
+// keywords: aggregate; instruction
+
+extractvalue_instruction(Insn) -> instruction(Insn).
+
+extractvalue_instruction:base[Insn] = Aggregate ->
+   extractvalue_instruction(Insn), operand(Aggregate).
+
+//------------------------
+// Aggregate Indices
+//------------------------
+
+extractvalue_instruction:nindices[Insn] = Total ->
+   extractvalue_instruction(Insn), int[64](Total).
+
+extractvalue_instruction:index[Insn, Index] = Idx ->
+   extractvalue_instruction(Insn), int[64](Index), int[64](Idx).
+
+instruction:next_index[Insn, Index] = Index + 1 <-
+   extractvalue_instruction:index[Insn, Index] = _.
+
+//------------------------------------------------
+// The resulting type for each dereference.
+//------------------------------------------------
+
+extractvalue_instruction:interm_type[Insn, 0] = Type <-
+   extractvalue_instruction:base[Insn] = Aggregate,
+   operand:type[Aggregate] = Type.
+
+extractvalue_instruction:interm_type[Insn, Next] = Comp <-
+   extractvalue_instruction:interm_type[Insn, Index] = Type,
+   extractvalue_instruction:index[Insn, Index] = IdxValue,
+   struct_type:field[Type, IdxValue] = Comp,
+   instruction:next_index[Insn, Index] = Next.
+
+extractvalue_instruction:interm_type[Insn, Next] = Comp <-
+   extractvalue_instruction:interm_type[Insn, Index] = Type,
+   array_type:component[Type] = Comp,
+   instruction:next_index[Insn, Index] = Next.
+
+extractvalue_instruction:value_type[Insn] = Type <-
+   extractvalue_instruction:nindices[Insn] = Total,
+   extractvalue_instruction:interm_type[Insn, Total] = Type.
+
+extractvalue_instruction:base_type[Insn] = Type <-
+   extractvalue_instruction:interm_type[Insn, 0] = Type.
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+//  (1) The first operand of an ‘extractvalue‘ instruction is
+//      a value of struct or array type.
+//  (2) At least one index must be specified.
+//
+// The result is the value at the position in the aggregate specified
+// by the index operands.
+//------------------------------------------------------------------------------
+
+schema:sanity()
+ , extractvalue_instruction(Insn)
+ ->
+   extractvalue_instruction:base[Insn] = _.
+
+schema:sanity()
+ , extractvalue_instruction(Insn)
+ ->
+   extractvalue_instruction:nindices[Insn] = _.
+
+schema:sanity()
+ , extractvalue_instruction(Insn)
+ ->
+   extractvalue_instruction:index[Insn, 0] = _.
+
+schema:sanity()
+ , extractvalue_instruction:nindices[_] = Total
+ ->
+   Total > 0. // c2
+
+schema:sanity()
+ , extractvalue_instruction:base_type[_] = Type
+ ->
+   aggregate_type(Type). // c1
+
+schema:sanity()
+ , extractvalue_instruction:value_type[Insn] = Type
+ ->
+   instruction:type[Insn] = Type. // creturn

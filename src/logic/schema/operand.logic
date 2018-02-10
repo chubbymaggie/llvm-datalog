@@ -1,0 +1,189 @@
+//------------------------------------------------------------------------------
+// [Variables]
+//
+// The first type of instruction operands are variables. In this
+// representation, variables correspond to LLVM virtual
+// registers. They are either source-level variables with valid names
+// or temporaries introduced by LLVM that hold intermediate expressions.
+//------------------------------------------------------------------------------
+
+variable(Var), variable:id(Var:Ref) -> string(Ref).
+
+lang:physical:capacity[`variable] = 8388608.
+
+variable:type[Var] = Type -> variable(Var), type(Type).
+
+variable:label(Var) <-
+   variable:type[Var] = Type,
+   label_type[] = Type.
+
+variable:pointer(Var) <-
+   variable:type[Var] = Type,
+   pointer_type(Type).
+
+variable:firstclass(Var) <-
+   variable:type[Var] = Type,
+   type:firstclass(Type).
+
+//---------------------------------------------------------
+// Debug-level information from source code (DWARF)
+//---------------------------------------------------------
+
+variable:debug:source_name[Var] = Name ->
+   variable(Var), string(Name).
+
+variable:debug:decl_pos(Var, Line, Column) ->
+   variable(Var), int[64](Line), int[64](Column).
+
+
+//------------------------------------------------------------------------------
+// [Constants]
+//
+// The second type of instruction operands are constants. Constants
+// may be quite complex (see constant expressions). Their full
+// hierarchy is represented in `constants.logic`.
+//------------------------------------------------------------------------------
+
+constant(C), constant:id(C:Ref) -> string(Ref).
+lang:physical:capacity[`constant] = 8388608.
+
+//---------------------------------------------------------
+// Mandatory constant attributes
+//---------------------------------------------------------
+
+constant:type[C] = Type -> constant(C), type(Type).
+constant:value[C] = Val -> constant(C), string(Val).
+
+schema:sanity(), constant(C)
+ ->
+   constant:type[C] = _.
+
+schema:sanity(), constant(C)
+ ->
+   constant:value[C] = _.
+
+//---------------------------------------------------------
+// Precomputed hash-codes for constant values
+//---------------------------------------------------------
+
+constant:hash[C] = HashCode -> constant(C), uint[64](HashCode).
+
+schema:sanity(), constant(C)
+ ->
+   constant:hash[C] = _.
+
+constant:by_hash(H, C) <-
+   constant:hash[C] = H.
+
+constant:eq(C1, C2) <-
+   constant:by_hash(H, C1),
+   constant:by_hash(H, C2),
+   constant:value[C1] = Val,
+   constant:value[C2] = Val.
+
+constant:ne(C1, C2) <-
+   constant:value[C1] = Val1,
+   constant:value[C2] = Val2,
+   Val1 != Val2.
+
+lang:derivationType[`constant:eq] = "Derived".
+lang:derivationType[`constant:ne] = "Derived".
+
+// constants cannot be labels
+schema:sanity()
+ , constant:type[_] = type
+ ->
+   label_type[] != type.
+
+
+
+//--------------------------------------------------
+// [Operands] as union of {variable, constant}
+//--------------------------------------------------
+
+operand(Operand) -> .
+
+lang:physical:capacity[`operand] = 8388608.
+
+// Constructors
+operand:by_variable[Var] = Operand  ->
+   variable(Var), operand(Operand).
+
+operand:by_constant[C] = Operand ->
+   constant(C), operand(Operand).
+
+lang:physical:storageModel[`operand] = "ScalableSparse".
+lang:constructor(`operand:by_variable).
+lang:constructor(`operand:by_constant).
+
+
+// Type predicate
+operand:type[Operand] = Type <-
+   operand:by_variable[Var] = Operand,
+   variable:type[Var] = Type.
+
+operand:type[Operand] = Type <-
+   operand:by_constant[C] = Operand,
+   constant:type[C] = Type.
+
+
+// View predicates
+operand:as_variable[Operand] = Var <-
+   operand:by_variable[Var] = Operand.
+
+operand:as_constant[Operand] = C <-
+   operand:by_constant[C] = Operand.
+
+// Auxiliary functions
+operand:pointer(Operand) <-
+   operand:type[Operand] = Type,
+   pointer_type(Type).
+
+operand:firstclass(Var) <-
+   operand:type[Var] = Type,
+   type:firstclass(Type).
+
+
+//----------------------------
+//  Handy Conversions
+//----------------------------
+
+constant:to_int[Constant] = Value ->
+   constant(Constant), int[64](Value).
+
+operand:to_int[Operand] = Value ->
+   operand(Operand), int[64](Value).
+
+operand:to_int[Operand] = Value <-
+   operand:by_constant[Constant] = Operand,
+   constant:to_int[Constant] = Value.
+
+
+//----------------------------
+// Refmode Parsing
+//----------------------------
+
+// TODO: This fails for large constants
+// constant:id_tokens[Constant, Index] = Token <-
+//    constant:id(Constant:Id), string:split[Id, ":", Index] = Token.
+
+constant:path[Constant] = Token <-
+   constant:id(Constant:Id), string:split[Id, ":", 0] = Token.
+
+constant:__token1[Constant] = Token <-
+   constant:id(Constant:Id), string:split[Id, ":", 1] = Token.
+
+variable:id_tokens[Var, Index] = Token <-
+   variable:id(Var:Id), string:split[Id, ":", Index] = Token.
+
+// Group variable properties into single predicate
+
+variable:descriptor(Var, Path, Func, Type, Name) ->
+   variable(Var), string(Path), string(Func), type(Type), string(Name).
+
+variable:descriptor(Var, Path, Func, Type, Name) <-
+   variable:id_tokens[Var, 0] = Path,
+   variable:id_tokens[Var, 1] = Fn,
+   variable:id_tokens[Var, 2] = Name,
+   variable:type[Var] = Type,
+   Func = "@" + Fn.

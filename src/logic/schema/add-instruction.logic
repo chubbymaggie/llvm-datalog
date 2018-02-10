@@ -1,0 +1,51 @@
+// http://llvm.org/docs/LangRef.html#add-instruction
+// keywords: arithmetic; binary; instruction
+
+add_instruction(Insn) -> instruction(Insn).
+
+add_instruction:first_operand[Insn] = Left ->
+   add_instruction(Insn), operand(Left).
+
+add_instruction:second_operand[Insn] = Right ->
+   add_instruction(Insn), operand(Right).
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// 1) The two arguments to the ‘add‘ instruction must be:
+//      (i)  integer or
+//      (ii) vector of integer values.
+//
+// 2) Both arguments must have identical types.
+//
+// 3) The resulting value is the same type as its operands.
+//------------------------------------------------------------------------------
+
+schema:sanity()
+ , add_instruction(Insn)
+ ->
+   add_instruction:first_operand[Insn] = _.
+
+schema:sanity()
+ , add_instruction(Insn)
+ ->
+   add_instruction:second_operand[Insn] = _.
+
+schema:sanity()
+ , add_instruction(Insn)
+ , instruction:type[Insn] = Type
+ ->
+   integer_type(Type); vector_type:integer(Type).
+
+schema:sanity()
+ , instruction:type[Insn] = Type
+ , add_instruction:first_operand[Insn] = Left
+ ->
+   operand:type[Left] = Type.
+
+schema:sanity()
+ , instruction:type[Insn] = Type
+ , add_instruction:second_operand[Insn] = Right
+ ->
+   operand:type[Right] = Type.
